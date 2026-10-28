@@ -77,15 +77,11 @@ def quantize_tensor(
 
 
 def dequantize(q: torch.Tensor, scale: torch.Tensor, zero_point: torch.Tensor) -> torch.Tensor:
-    """Map integers back to real values: ``w_hat = (q - zero_point) * scale``."""
-    raise NotImplementedError
-
+    #Map integers back to real values: ``w_hat = (q - zero_point) * scale``.
+    q = q - zero_point
+    return q * scale
 
 def fake_quantize(w: torch.Tensor, **cfg) -> torch.Tensor:
-    """Quantize then dequantize. Same shape and dtype as w.
-
-    This is what the sweep swaps into the model: the network still runs in fp32,
-    but every weight now sits on the quantization grid, so the error is real.
-    ``cfg`` is passed straight through to ``quantize_tensor``.
-    """
-    raise NotImplementedError
+    #Quantize then dequantize. Same shape and dtype as w.
+    q, scale, zero_point = quantize_tensor(w, **cfg)
+    return dequantize(q, scale, zero_point)
