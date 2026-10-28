@@ -1,37 +1,53 @@
 # QuantLab
 
-An interactive explorer of weight quantization on GPT-2 (124M). It shows that rounding weights to 4 bits only works if
-few enough weights share each grid: one scale per matrix destroys the model (perplexity 26 → ~5,900), while one scale
-per 128 weights keeps it nearly intact (26–31).
+QuantLab is an interactive page that shows what happens to GPT-2 when you round its weights down to 8 or 4 bits.
 
-## What it covers, and what it doesn't
+Quantization stores each weight as a small integer on an evenly spaced grid instead of a 32-bit float. The big question
+is how many weights should share one grid. With one grid for a whole matrix, 4-bit GPT-2 falls apart (perplexity goes
+from 26 to about 5,900). With one grid per 128 weights, it barely changes (26–31). The page lets you flip between 24
+settings and see why: the weight distribution before and after rounding, which layers take the most damage, and the
+text the model writes.
 
-This is **weight-only** quantization. The stored weights are rounded to an int grid and dequantized before use. The
-activations flowing between layers stay fp32 throughout. Quantizing activations is a different, harder problem: a few
-activation channels run 10–100× larger than the rest, so one shared activation scale crushes everything else into a
-couple of levels. That is the problem LLM.int8(), SmoothQuant and AWQ each address, and it is not modelled here.
+## How it works
 
-Quantized: the 48 block matrices (attention QKV + output, MLP up + down, × 12 blocks). Embeddings and the tied `lm_head`
-stay fp32. That's a choice, not a requirement.
+1. `core/quant.py` contains the rounding math: per-matrix, per-channel and per-128-weight grids, symmetric and
+   asymmetric, with optional clipping.
+2. `core/sweep.py` loads GPT-2 small, rounds its 48 block matrices under each setting, and records per-layer error,
+   perplexity, and greedy text generations.
+3. `core/export.py` writes the results to `web/public/data/` as static JSON.
+4. `web/` is a small Vite + React page that reads that JSON. There's no backend, so it can be hosted anywhere static.
 
-## Layout
+## Setup
 
-```
-core/quant.py      quantize / dequantize: per-tensor, per-channel, group-wise, percentile clipping
-core/sweep.py      24 configs x 48 matrices -> per-layer metrics, perplexity, greedy generations
-core/evaluate.py   perplexity on 2,048 tokens of Pride and Prejudice; 4 fixed prompts, greedy
-core/export.py     -> web/public/data/*.json (static; no backend)
-web/               Vite + React + TS
-```
+You need Python 3.11+ and Node 18+.
 
-## Reproduce
+**Python side** (only needed if you want to rerun the sweep; the results are already committed):
 
 ```
 python -m venv .venv
-.venv\Scripts\pip install torch --index-url https://download.pytorch.org/whl/cpu
-.venv\Scripts\pip install transformers numpy pytest
-.venv\Scripts\python -m pytest -q
-.venv\Scripts\python -m core.sweep      # ~4 min on CPU
-.venv\Scripts\python -m core.export
-cd web && npm install && npm run dev
+.venv\Scripts\activate            # macOS/Linux: source .venv/bin/activate
+pip install torch --index-url https://download.pytorch.org/whl/cpu
+pip install transformers numpy pytest
+
+python -m pytest -q               # 16 tests for the quantization math
+python -m core.sweep              # ~4 min on CPU, downloads GPT-2 (~500 MB) the first time
+python -m core.export             # writes web/public/data/*.json
 ```
+
+**Web side:**
+
+```
+cd web
+npm install
+npm run dev                       # local dev server
+npm run build                     # static site in web/dist
+```
+
+**Deploying:** on Vercel, import the repo and set the Root Directory to `web`. It's detected as a Vite project with no
+other settings needed.
+
+## Scope
+
+This is weight-only quantization: the stored weights are rounded, while the activations passing between layers stay
+32-bit. Embeddings and the output layer aren't rounded. Rounding activations is a separate, harder problem (see
+LLM.int8(), SmoothQuant, AWQ) and isn't covered here.
