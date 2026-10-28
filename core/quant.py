@@ -12,6 +12,7 @@ Conventions used throughout:
   ``dequantize`` never needs to know which granularity was used.
 """
 
+from numpy import integer
 import torch
 
 
@@ -33,44 +34,46 @@ def quantize_tensor(
     group_size: int | None = None,
     clip_pct: float = 100,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Quantize ``w`` to ``bits``-bit integers.
+    #Quantize a weight tensor to integers, returning (q, scale, zero_point).
+    qmin, qmax = qrange(bits, symmetric)
 
-    Granularity is chosen by the arguments:
+    # Arrange w as (n_groups, group_len, n_channels) so every case reduces over dim 1.
+    if axis is None:
+        view = w.reshape(1, -1, 1)              # per-tensor: one group, one channel
+    else:
+        if axis == 0:
+            wt = w.T
+        else:
+            wt = w
+        # put the channels on dim 1
+        n_in, n_out = wt.shape
+        g = group_size or n_in                  # per-channel = one group spanning the channel
+        view = wt.reshape(n_in // g, g, n_out)  # view[k, :, j] = chunk k of channel j
 
-    =================  ==========================  =====================================
-    per-tensor         ``axis=None``               one scale for all of w
-    per-channel        ``axis=k``                  one scale per index along dim k
-    group-wise         ``axis=k, group_size=g``    the *other* dim is cut into blocks
-                                                   of g; one scale per (block, channel)
-    =================  ==========================  =====================================
+    if symmetric:
+        absmax = torch.quantile(view.abs(), clip_pct / 100, dim=1, keepdim=True)
+        scale = (absmax / qmax).clamp_min(1e-12)
+        zero_point = torch.zeros_like(scale)
+    else:
+        lo = torch.quantile(view, (100 - clip_pct) / 200, dim=1, keepdim=True)
+        hi = torch.quantile(view, (100 + clip_pct) / 200, dim=1, keepdim=True)
+        scale = ((hi - lo) / (qmax - qmin)).clamp_min(1e-12)
+        zero_point = torch.round(qmin - lo / scale)
 
-    Group-wise only needs to support 2-D w. Its reduction dim must be divisible
-    by ``group_size``. Hint: for a (in, out) weight with axis=1, view it as
-    ``(in // g, g, out)`` and reduce over dim 1 with ``keepdim=True``.
+    q = torch.clamp(torch.round(view / scale) + zero_point, qmin, qmax)
 
-    Steps:
-
-    1. Calibration range per scale-group (the elements that share one scale):
-       symmetric  -> ``absmax``. With clipping, use the ``clip_pct`` percentile of
-                     ``|w|`` instead of the true max.
-       asymmetric -> ``(lo, hi)``. With clipping, use the ``(100 - clip_pct) / 2`` and
-                     ``(100 + clip_pct) / 2`` percentiles, so the clipped mass is
-                     split between both tails. ``clip_pct=100`` must equal the true
-                     min/max. (``torch.quantile`` takes q in [0, 1] and a ``dim``.)
-    2. Scale and zero point:
-       symmetric  -> ``scale = absmax / qmax``, ``zero_point = 0``
-       asymmetric -> ``scale = (hi - lo) / (qmax - qmin)``,
-                     ``zero_point = round(qmin - lo / scale)``
-       Guard against ``scale == 0`` (a constant channel), e.g. ``clamp_min(1e-12)``.
-    3. ``q = clamp(round(w / scale) + zero_point, qmin, qmax)``
-
-    Returns:
-        q: same shape as w, integer-valued floats.
-        scale, zero_point: broadcastable to w. For per-tensor these are 0-d;
-            for per-channel with axis=1 on 2-D w, shape (1, out); for group-wise,
-            expand back to w's full shape (each block's scale repeated).
-    """
-    raise NotImplementedError
+    # Undo the arrangement so q matches w and scale/zero_point broadcast against it.
+    if axis is None:
+        return q.reshape(w.shape), scale.reshape(()), zero_point.reshape(())
+    if group_size is None:
+        scale, zero_point = scale.reshape(1, n_out), zero_point.reshape(1, n_out)
+    else:
+        scale = scale.expand_as(view).reshape(n_in, n_out)
+        zero_point = zero_point.expand_as(view).reshape(n_in, n_out)
+    q = q.reshape(n_in, n_out)
+    if axis == 0:
+        q, scale, zero_point = q.T, scale.T, zero_point.T
+    return q, scale, zero_point
 
 
 def dequantize(q: torch.Tensor, scale: torch.Tensor, zero_point: torch.Tensor) -> torch.Tensor:
