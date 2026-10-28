@@ -1,0 +1,9 @@
+[project]
+name = "quantlab"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = ["torch", "transformers", "numpy", "pytest"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["core/tests"]
