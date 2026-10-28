@@ -16,32 +16,34 @@ interface Props {
 
 export function Generations({ prompts, baseline, config }: Props) {
   return (
-    <div className="gens">
+    <>
       {prompts.map((prompt, i) => {
         const key = `prompt_${i}`
         const ref = baseline.generations[key] ?? ''
         const out = config.generations[key] ?? ''
         const n = commonPrefix(ref, out)
         return (
-          <div className="gen" key={key}>
-            <div className="gen-prompt">{prompt}</div>
-            <div className="gen-cols">
+          <div key={key}>
+            <p>
+              <b>Prompt:</b> <code>{prompt}</code>
+            </p>
+            <div className="cols">
               <div>
-                <div className="gen-label">fp32</div>
+                <i>original (fp32)</i>
                 <pre>{ref}</pre>
               </div>
               <div>
-                <div className="gen-label">{config.id}</div>
+                <i>{config.id}</i>
                 <pre>
                   {out.slice(0, n)}
                   <mark>{out.slice(n)}</mark>
                 </pre>
               </div>
             </div>
+            <hr />
           </div>
         )
       })}
-      <p className="muted small">Greedy decoding, so any difference is caused by the quantized weights, not sampling. Highlight marks where the text first departs from fp32.</p>
-    </div>
+    </>
   )
 }
