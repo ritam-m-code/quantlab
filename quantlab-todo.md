@@ -194,4 +194,25 @@ That is what LLM.int8(), SmoothQuant and AWQ are each attacking.
 
 ## Review
 
-_(fill in after build)_
+Status 2026-10-28:
+
+- [x] quant.py + 16 tests green
+- [x] Full 24-config sweep: ~8s/config, ~4 min total (grid cut not needed)
+- [x] Export: 1.9 MB total (configs 0.36, layers 0.31, w_hat hists 1.2)
+- [x] Frontend: histogram + grid, heatmap, generations, perplexity readout + ranking. Built and
+      screenshot-checked against the production preview.
+- [x] README (weight-only vs activation stated)
+- [ ] Vercel: import repo, Root Directory = `web` (Vite preset, `npm run build`, output `dist`)
+- [ ] Predictions written + checked against results
+- [ ] Explain group size without notes
+
+Results (perplexity, fp32 = 26.27):
+
+| | per-tensor | per-channel | group-128 |
+|---|---|---|---|
+| 8-bit sym | 27.9 | 26.1 | 26.4 |
+| 4-bit sym | **5,939** | 44.0 | 31.0 |
+| 4-bit asym | **5,785** | 28.7 | 26.5 |
+
+Surprises worth a look: 99.9% clipping *hurts* 8-bit per-tensor (27.9 → 40.5): the clipped
+outliers matter. Some 8-bit configs score just under fp32: noise on a 2k-token passage.
